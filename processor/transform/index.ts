@@ -1,6 +1,7 @@
 import calloutTransformer from './callouts';
 import codeTabsTransformer from './code-tabs';
 import compatabilityTransfomer from './compatability';
+import commentBlocks from './comment-blocks';
 import divTransformer from './div';
 import embedTransformer from './embeds';
 import gemojiTransformer from './gemoji+';
@@ -17,6 +18,7 @@ import variablesTransformer from './variables';
 
 export {
   compatabilityTransfomer,
+  commentBlocks,
   divTransformer,
   injectComponents,
   mdxToHast,
