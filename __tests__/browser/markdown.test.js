@@ -10,6 +10,8 @@ describe('visual regression tests', () => {
       await page.setViewport({ width: 1400, height: 800 });
     });
 
+    // test pipeline
+
     const docs = [
       'callouts',
       'calloutTests',
