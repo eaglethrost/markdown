@@ -46,7 +46,9 @@ function evaluateExpression(expression: string, context: JSXContext): unknown {
 
 // Base64 encode HTMLBlock content to prevent parser from consuming <script>/<style> tags
 function protectHTMLBlockContent(content: string): string {
-  // each char matches exactly one way, preventing backtracking
+  // ReDoS-safe: Uses an unrolling pattern (?:[^`\\]|\\.)* where each character matches exactly
+  // one way (either a non-backtick/non-backslash, OR an escape sequence like \`). This eliminates
+  // backtracking because the regex engine never has to try multiple paths for the same character.
   return content.replace(
     /(<HTMLBlock[^>]*>)\{\s*`((?:[^`\\]|\\.)*)`\s*\}(<\/HTMLBlock>)/g,
     (_match, openTag: string, templateContent: string, closeTag: string) => {
@@ -65,6 +67,8 @@ function protectCodeBlocks(content: string): ProtectCodeBlocksResult {
   let remaining = content;
   let codeBlockStart = remaining.indexOf('```');
 
+  // ReDoS-safe: Uses indexOf() instead of regex to find code blocks. String search operations
+  // like indexOf are O(n) and cannot experience catastrophic backtracking like regex can.
   while (codeBlockStart !== -1) {
     protectedContent += remaining.slice(0, codeBlockStart);
     remaining = remaining.slice(codeBlockStart);
@@ -96,11 +100,15 @@ function protectCodeBlocks(content: string): ProtectCodeBlocksResult {
 }
 
 function removeJSXComments(content: string): string {
-  // This matches: any non-* chars, then (* followed by non-/ followed by non-* chars) repeated
+  // ReDoS-safe: Uses an unrolling pattern [^*]*(?:\*(?!\/)[^*]*)* which matches non-asterisk
+  // chars, then (asterisk-not-followed-by-slash + non-asterisk chars) repeated. The negative
+  // lookahead (?!\/) ensures each asterisk has only one interpretation, preventing backtracking.
   return content.replace(/\{\s*\/\*[^*]*(?:\*(?!\/)[^*]*)*\*\/\s*\}/g, '');
 }
 
 // Returns content between balanced braces and end position, or null if unbalanced
+// ReDoS-safe: Uses a simple linear scan with depth counter instead of regex. This approach is
+// O(n) and cannot suffer from catastrophic backtracking since no regex patterns are involved.
 function extractBalancedBraces(content: string, start: number): { content: string; end: number } | null {
   let depth = 1;
   let pos = start;
