@@ -10,7 +10,15 @@ import { getAttrs } from '../utils';
 
 const isImage = (node: Node): node is Image => node.type === 'image';
 
-const imageTransformer = () => (tree: Node) => {
+// The original node might have extra properties that affect visual output, optionally retain them
+// Especially if they come from magic blocks, whihc may contain properties such as widht, align, etc.
+interface ImageTransformerOptions {
+  spreadHProperties?: boolean;
+}
+
+const imageTransformer = (opts: ImageTransformerOptions = {}) => (tree: Node) => {
+  const { spreadHProperties = true } = opts;
+
   visit(tree, 'paragraph', (node: Paragraph, i: number, parent: Parents) => {
     // check if inline
     if (parent.type !== 'root' || node.children?.length > 1) return;
@@ -25,6 +33,8 @@ const imageTransformer = () => (tree: Node) => {
       title,
       children: [],
       src: url,
+      // For mdxish, we want to all the original properties to retain visual output
+      ...(spreadHProperties ? child.data?.hProperties : {})
     };
 
     const newNode: ImageBlock = {

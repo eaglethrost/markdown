@@ -17,6 +17,7 @@ import { mdxComponentHandlers } from '../processor/plugin/mdxish-handlers';
 import calloutTransformer from '../processor/transform/callouts';
 import codeTabsTransformer from '../processor/transform/code-tabs';
 import embedTransformer from '../processor/transform/embeds';
+import magicBlockRestorer from '../processor/transform/magic-block';
 import evaluateExpressions from '../processor/transform/evaluate-expressions';
 import gemojiTransformer from '../processor/transform/gemoji+';
 import imageTransformer from '../processor/transform/images';
@@ -28,14 +29,20 @@ import tailwindTransformer from '../processor/transform/tailwind';
 import variablesTextTransformer from '../processor/transform/variables-text';
 
 import { loadComponents } from './utils/load-components';
+import { extractMagicBlocks } from './utils/extractMagicBlocks';
 
 export interface MdxishOpts {
   components?: CustomComponents;
   jsxContext?: JSXContext;
   useTailwind?: boolean;
+  // Optional legacy renderer for magic blocks and other legacy parsing behavior
+  rdmd?: {
+    setup: (doc: string) => [string];
+    processor: () => any;
+  };
 }
 
-const defaultTransformers = [calloutTransformer, codeTabsTransformer, imageTransformer, gemojiTransformer];
+const defaultTransformers = [calloutTransformer, codeTabsTransformer, gemojiTransformer];
 
 /**
  * Process markdown content with MDX syntax support.
@@ -44,14 +51,16 @@ const defaultTransformers = [calloutTransformer, codeTabsTransformer, imageTrans
  * @see {@link https://github.com/readmeio/rmdx/blob/main/docs/mdxish-flow.md}
  */
 export function mdxish(mdContent: string, opts: MdxishOpts = {}): Root {
-  const { components: userComponents = {}, jsxContext = {}, useTailwind } = opts;
+  const { components: userComponents = {}, jsxContext = {}, useTailwind, rdmd } = opts;
 
   const components: CustomComponents = {
     ...loadComponents(),
     ...userComponents,
   };
 
-  const processedContent = preprocessJSXExpressions(mdContent, jsxContext);
+  // Preprocess mdxish content. Things that need preprocessing are magic blocks and JSX expressions.
+  const { replaced, blocks } = rdmd ? extractMagicBlocks(mdContent) : { replaced: mdContent, blocks: [] };
+  const processedContent = preprocessJSXExpressions(replaced, jsxContext);
 
   // Create temp map string to string of components
   const tempComponentsMap = Object.entries(components).reduce((acc, [key, value]) => {
@@ -64,6 +73,8 @@ export function mdxish(mdContent: string, opts: MdxishOpts = {}): Root {
     .data('fromMarkdownExtensions', [mdxExpressionFromMarkdown()])
     .use(remarkParse)
     .use(remarkFrontmatter)
+    .use(rdmd ? magicBlockRestorer : undefined, { blocks, rdmd })
+    .use(imageTransformer, { spreadHProperties: blocks.length > 0 })  // Retain more properties from the image block since it may contain more info
     .use(defaultTransformers)
     .use(mdxishComponentBlocks)
     .use(mdxishTables)

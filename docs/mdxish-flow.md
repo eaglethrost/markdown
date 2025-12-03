@@ -27,11 +27,12 @@ The `mdxish` function processes markdown content with MDX-like syntax support, d
 │  ─────────────────────────────────────────────────────────────────────────  │
 │  preprocessJSXExpressions(content, jsxContext)                              │
 │                                                                             │
-│  0. Protect HTMLBlock content (base64 encode to prevent parser issues)      │
-│  1. Extract & protect code blocks (```...```) and inline code (`...`)       │
-│  2. Remove JSX comments: {/* comment */} → ""                               │
-│  3. Evaluate attribute expressions: href={baseUrl} → href="https://..."     │
-│  4. Restore protected code blocks                                           │
+│  0. (If `rdmd` is enabled) magic blocks are extracted first; see below.     │
+│  1. Protect HTMLBlock content (base64 encode to prevent parser issues)      │
+│  2. Extract & protect code blocks (```...```) and inline code (`...`)       │
+│  3. Remove JSX comments: {/* comment */} → ""                               │
+│  4. Evaluate attribute expressions: href={baseUrl} → href="https://..."     │
+│  5. Restore protected code blocks                                           │
 │                                                                             │
 │  Note: Inline expressions ({5 * 10}) are now parsed by mdast-util-mdx-      │
 │  expression and evaluated in the AST transformer (evaluateExpressions)      │
@@ -67,8 +68,24 @@ The `mdxish` function processes markdown content with MDX-like syntax support, d
 │  ───────────────   │                │                             │
 │  1. callout        │                │                             │
 │  2. codeTabs       │                │                             │
-│  3. image          │                │                             │
-│  4. gemoji         │                │                             │
+│  3. gemoji         │                │                             │
+│  (image runs right │                │                             │
+│   after this step) │                │                             │
+└────────────────────┘                │                             │
+        │                             │                             │
+        ▼                             │                             │
+┌────────────────────┐                │                             │
+│ imageTransformer   │                │                             │
+│  ───────────────   │                │                             │
+│  Converts markdown │                │                             │
+│  images and RDMD   │                │                             │
+│  magic block       │                │                             │
+│  images to <img>.  │                │                             │
+│  When magic blocks │                │                             │
+│  are present it    │                │                             │
+│  preserves extra   │                │                             │
+│  hProperties from  │                │                             │
+│  the legacy parser.│                │                             │
 └────────────────────┘                │                             │
         │                             │                             │
         ▼                             │                             │
@@ -250,7 +267,9 @@ The `mdxish` function processes markdown content with MDX-like syntax support, d
 | Pre-process | `preprocessJSXExpressions` | Protect HTMLBlock content, evaluate JSX attribute expressions (`href={baseUrl}`) |
 | MDAST | `remarkParse` + extensions | Markdown → AST with MDX expression parsing (`mdast-util-mdx-expression`) |
 | MDAST | `remarkFrontmatter` | Parse YAML frontmatter (metadata) |
-| MDAST | `defaultTransformers` | Transform callouts, code tabs, images, gemojis |
+| MDAST | `magicBlockRestorer` (when `rdmd` is provided) | Replaces extracted magic block tokens with MDAST produced by the legacy `@readme/markdown-legacy` parser (via `magic-blocks-legacy`), restoring image blocks, parameter blocks, etc. |
+| MDAST | `defaultTransformers` | Transform callouts, code tabs, gemojis |
+| MDAST | `imageTransformer` | Converts markdown images and RDMD magic block images to `<img>` elements; when magic blocks are present it preserves extra `hProperties` such as `align`, `sizing`, etc. from the legacy parser |
 | MDAST | `mdxishComponentBlocks` | PascalCase HTML → `mdxJsxFlowElement` |
 | MDAST | `mdxishTables` | `<Table>` JSX → markdown `table` nodes, re-parse markdown in cells |
 | MDAST | `mdxishHtmlBlocks` | `<HTMLBlock>{`...`}</HTMLBlock>` → `html-block` nodes |
@@ -364,3 +383,20 @@ The `mdxishHtmlBlocks` transformer converts `<HTMLBlock>{`...`}</HTMLBlock>` syn
 To prevent the markdown parser from incorrectly consuming `<script>`, `<style>` tags inside HTMLBlocks, the content is base64-encoded during preprocessing and decoded by the transformer.
 
 The transformer handles nested template literals with code fences (e.g., `<HTMLBlock>{`<pre>```javascript\nconst x = 1;\n```</pre>`}</HTMLBlock>`), preserving newlines and correctly reconstructing triple backticks that may be consumed by the markdown parser. The `formatHTML` utility processes the content to unescape backticks, convert `\n` sequences to actual newlines, and fix cases where the parser consumed backticks from code fences.
+
+## Magic blocks & legacy markdown (RDMD) integration
+
+- **Extraction (`extractMagicBlocks`)**: Before JSX preprocessing runs, when `mdxish` is called with an `rdmd` option, we scan the raw markdown for RDMD-style magic blocks of the form `[block:TYPE]...[/block]`. Each match is:
+  - Replaced with a unique inline code token like `` `__MAGIC_BLOCK_0__` `` so `remarkParse` will not try to interpret the JSON/markup inside as normal markdown.
+  - Stored in a `blocks` array as `{ token, raw }` (`BlockHit`), which is passed into the remark phase.
+
+- **Restoration (`magicBlockRestorer`)**: Early in the remark pipeline (right after `remarkFrontmatter`), the `magicBlockRestorer` transformer runs when `rdmd` is provided. It:
+  - Visits `inlineCode` nodes and looks for the special magic block tokens.
+  - For each token, calls `rdmd.setup(raw)` and `rdmd.processor().use(magicBlocksLegacy)` to parse the original magic block content with the legacy `@readme/markdown-legacy` parser.
+  - Splices the resulting legacy MDAST children back into the current tree, effectively inlining the legacy-parsed nodes (for image blocks, parameter/table blocks, etc.).
+
+- **Image integration (`imageTransformer`)**: After magic blocks are restored:
+  - `imageTransformer` runs on the combined tree, converting both standard markdown images and images produced by magic blocks into `<img>` elements in HAST.
+  - When any magic blocks were present, it enables `spreadHProperties`, so attributes coming from the legacy parser (like `align`, `sizing`, and other layout hints) are preserved on the resulting `img` node.
+
+Together, this allows `mdxish` to remain compatible with existing RDMD content: magic blocks are parsed with the legacy pipeline, then seamlessly merged into the modern mdxish processing flow.

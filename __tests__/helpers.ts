@@ -2,7 +2,7 @@ import * as rdmd from '@readme/markdown-legacy';
 
 import { vi } from 'vitest';
 
-import { run, compile, migrate as baseMigrate } from '../index';
+import { run, compile, migrate as baseMigrate, mdxish } from '../index';
 
 export const silenceConsole =
   (prop: keyof Console = 'error', impl = () => {}) =>
@@ -28,3 +28,8 @@ export const execute = (doc: string, compileOpts = {}, runOpts = {}, { getDefaul
 export const migrate = (doc: string) => {
   return baseMigrate(doc, { rdmd });
 };
+
+export const mdxishWrapper = (doc: string) => {
+  return mdxish(doc, { rdmd });
+};
+
