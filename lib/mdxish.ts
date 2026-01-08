@@ -78,7 +78,7 @@ export function mdxish(mdContent: string, opts: MdxishOpts = {}): Root {
     .use(remarkParse)
     .use(remarkFrontmatter)
     .use(normalizeEmphasisAST)
-    .use(magicBlockRestorer, { blocks })
+    .use(magicBlockRestorer, { blocks, jsxContext })
     .use(imageTransformer, { isMdxish: true })
     .use(defaultTransformers)
     .use(mdxishComponentBlocks)

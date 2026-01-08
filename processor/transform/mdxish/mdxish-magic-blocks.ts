@@ -4,11 +4,14 @@
  * Taken from the v6 branch with some modifications to be more type safe
  * and adapted with the mdxish flow.
  */
+import type { JSXContext } from './preprocess-jsx-expressions';
 import type { BlockHit } from '../../../lib/utils/extractMagicBlocks';
 import type { Code, Parent, Root as MdastRoot, RootContent } from 'mdast';
 import type { MdxJsxFlowElement } from 'mdast-util-mdx-jsx';
 import type { Plugin } from 'unified';
 
+import { mdxExpressionFromMarkdown } from 'mdast-util-mdx-expression';
+import { mdxExpression } from 'micromark-extension-mdx-expression';
 import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
@@ -82,6 +85,7 @@ interface HtmlJson extends MagicBlockJson {
 export interface ParseMagicBlockOptions {
   alwaysThrow?: boolean;
   compatibilityMode?: boolean;
+  jsxContext?: JSXContext;
   safeMode?: boolean;
 }
 
@@ -124,13 +128,19 @@ const textToInline = (text: string): MdastNode[] => [{ type: 'text', value: text
 const textToBlock = (text: string): MdastNode[] => [{ children: textToInline(text), type: 'paragraph' }];
 
 
-/** Parses markdown and html to markdown nodes */
-const contentParser = unified().use(remarkParse).use(remarkGfm);
+/** Parses markdown and html to markdown nodes, including MDX expressions */
+const createContentParser = () =>
+  unified()
+    .data('micromarkExtensions', [mdxExpression({ allowEmpty: true })])
+    .data('fromMarkdownExtensions', [mdxExpressionFromMarkdown()])
+    .use(remarkParse)
+    .use(remarkGfm);
 
 // Table cells may contain html or markdown content, so we need to parse it accordingly instead of keeping it as raw text
 const parseTableCell = (text: string): MdastNode[] => {
   if (!text.trim()) return [{ type: 'text', value: '' }];
-  const tree = contentParser.runSync(contentParser.parse(text)) as MdastRoot;
+  const parser = createContentParser();
+  const tree = parser.runSync(parser.parse(text)) as MdastRoot;
   return tree.children.flatMap(n =>
     // This unwraps the extra p node that might appear & wrapping the content
     n.type === 'paragraph' && 'children' in n ? (n.children as MdastNode[]) : [n as MdastNode],
@@ -140,7 +150,8 @@ const parseTableCell = (text: string): MdastNode[] => {
 // Parse markdown/HTML into block-level nodes (preserves paragraphs, headings, lists, etc.)
 const parseBlock = (text: string): MdastNode[] => {
   if (!text.trim()) return [];
-  const tree = contentParser.runSync(contentParser.parse(text)) as MdastRoot;
+  const parser = createContentParser();
+  const tree = parser.runSync(parser.parse(text)) as MdastRoot;
   return tree.children as MdastNode[];
 };
 
@@ -417,8 +428,8 @@ const needsUnwrapping = (child: RootContent): boolean => {
  * with inline code tokens like `__MAGIC_BLOCK_0__`. This plugin finds those
  * tokens in the parsed MDAST and replaces them with the parsed block content.
  */
-const magicBlockRestorer: Plugin<[{ blocks: BlockHit[] }], MdastRoot> =
-  ({ blocks }) =>
+const magicBlockRestorer: Plugin<[{ blocks: BlockHit[]; jsxContext?: JSXContext }], MdastRoot> =
+  ({ blocks, jsxContext = {} }) =>
   tree => {
     if (!blocks.length) return;
 
@@ -433,7 +444,7 @@ const magicBlockRestorer: Plugin<[{ blocks: BlockHit[] }], MdastRoot> =
       const raw = magicBlockKeys.get(node.value);
       if (!raw) return undefined;
 
-      const children = parseMagicBlock(raw) as unknown as RootContent[];
+      const children = parseMagicBlock(raw, { jsxContext }) as unknown as RootContent[];
       if (!children.length) return undefined;
 
       if (children[0] && needsUnwrapping(children[0]) && parent.type === 'paragraph') {
